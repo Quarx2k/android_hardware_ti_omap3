@@ -85,7 +85,7 @@ char compName[60][200];
 char *tComponentName[MAXCOMP][3] = {
     /*video and image components */
     {"OMX.TI.JPEG.decoder", "image_decoder.jpeg", MAX_CONCURRENT_INSTANCES},
-    {"OMX.TI.JPEG.encoder", "image_encoder.jpeg", MAX_CONCURRENT_INSTANCES},
+    {"OMX.TI.JPEG.Encoder", "image_encoder.jpeg", MAX_CONCURRENT_INSTANCES},
     {"OMX.TI.Video.Decoder", "video_decoder.h263", MAX_CONCURRENT_INSTANCES},
     {"OMX.TI.Video.Decoder", "video_decoder.avc", MAX_CONCURRENT_INSTANCES},
     {"OMX.TI.Video.Decoder", "video_decoder.mpeg2", MAX_CONCURRENT_INSTANCES},
