@@ -1248,33 +1248,15 @@ static int omap3_hwc_prepare(struct hwc_composer_device_1 *dev, size_t numDispla
     return 0;
 }
 
-static int omap3_hwc_set(struct hwc_composer_device_1 *dev,
-        size_t numDisplays, hwc_display_contents_1_t** displays)
+static void dump_set_info(omap3_hwc_device_t *hwc_dev,
+        hwc_display_contents_1_t *list)
 {
-    if (!numDisplays || displays == NULL) {
-        ALOGD("set: empty display list");
-        return 0;
-    }
-    hwc_display_t dpy = NULL;
-    hwc_surface_t sur = NULL;
-    hwc_display_contents_1_t* list = displays[0];  // ignore displays beyond the first
-    if (list != NULL) {
-        dpy = list->dpy;
-        sur = list->sur;
-    }
-    omap3_hwc_device_t *hwc_dev = (omap3_hwc_device_t *)dev;
-    struct dsscomp_setup_dispc_data *dsscomp = &hwc_dev->dsscomp_data;
-    int err = 0;
-    unsigned int i;
-    int invalidate;
-
-    pthread_mutex_lock(&hwc_dev->lock);
-
-    invalidate = hwc_dev->ext_ovls_wanted && !hwc_dev->ext_ovls;
-
     char big_log[1024];
     int e = sizeof(big_log);
     char *end = big_log + e;
+    struct dsscomp_setup_dispc_data *dsscomp = &hwc_dev->dsscomp_data;
+    unsigned int i;
+
     e -= snprintf(end - e, e, "set H{");
     for (i = 0; list && i < list->numHwLayers; i++) {
         if (i)
@@ -1325,9 +1307,35 @@ static int omap3_hwc_set(struct hwc_composer_device_1 *dev,
         e -= snprintf(end - e, e, "%p", hwc_dev->buffers[i]);
     }
     e -= snprintf(end - e, e, "}%s\n", hwc_dev->use_sgx ? " swap" : "");
-    if (debug) {
-        ALOGD("%s", big_log);
+    ALOGD("%s", big_log);
+}
+
+static int omap3_hwc_set(struct hwc_composer_device_1 *dev,
+        size_t numDisplays, hwc_display_contents_1_t** displays)
+{
+    if (!numDisplays || displays == NULL) {
+        ALOGD("set: empty display list");
+        return 0;
     }
+    hwc_display_t dpy = NULL;
+    hwc_surface_t sur = NULL;
+    hwc_display_contents_1_t* list = displays[0];  // ignore displays beyond the first
+    if (list != NULL) {
+        dpy = list->dpy;
+        sur = list->sur;
+    }
+    omap3_hwc_device_t *hwc_dev = (omap3_hwc_device_t *)dev;
+    struct dsscomp_setup_dispc_data *dsscomp = &hwc_dev->dsscomp_data;
+    int err = 0;
+    unsigned int i;
+    int invalidate;
+
+    pthread_mutex_lock(&hwc_dev->lock);
+
+    invalidate = hwc_dev->ext_ovls_wanted && !hwc_dev->ext_ovls;
+
+    if (debug)
+        dump_set_info(hwc_dev, list);
 
     // ALOGD("set %d layers (sgx=%d)\n", dsscomp->num_ovls, hwc_dev->use_sgx);
 
@@ -1606,7 +1614,7 @@ static void *omap3_hwc_hdmi_thread(void *data)
     static char uevent_desc[4096];
     struct pollfd fds[2];
     int prev_force_sgx = 0;
-    int timeout;
+    int timeout = -1;
     int err;
 
     setpriority(PRIO_PROCESS, 0, HAL_PRIORITY_URGENT_DISPLAY);
@@ -1617,8 +1625,6 @@ static void *omap3_hwc_hdmi_thread(void *data)
     fds[0].events = POLLIN;
     fds[1].fd = hwc_dev->pipe_fds[0];
     fds[1].events = POLLIN;
-
-    timeout = hwc_dev->idle ? hwc_dev->idle : -1;
 
     memset(uevent_desc, 0, sizeof(uevent_desc));
 
@@ -1836,20 +1842,6 @@ static int omap3_hwc_device_open(const hw_module_t* module, const char* name,
             goto done;
     }
 
-    if (pthread_create(&hwc_dev->hdmi_thread, NULL, omap3_hwc_hdmi_thread, hwc_dev))
-    {
-            ALOGE("failed to create uevent listening thread (%d): %m", errno);
-            err = -errno;
-            goto done;
-    }
-
-    if (pthread_create(&hwc_dev->vsync_thread, NULL, vsync_loop, hwc_dev))
-    {
-            ALOGE("failed to create vsync-sysfs listening thread (%d): %m", errno);
-            err = -errno;
-            goto done;
-    }
-
     /* get debug properties */
 
     /* see if hwc is enabled at all */
@@ -1875,6 +1867,20 @@ static int omap3_hwc_device_open(const hw_module_t* module, const char* name,
     ALOGI("clone region is set to (%d,%d) to (%d,%d)",
          hwc_dev->ext.mirror_region.left, hwc_dev->ext.mirror_region.top,
          hwc_dev->ext.mirror_region.right, hwc_dev->ext.mirror_region.bottom);
+
+    if (pthread_create(&hwc_dev->hdmi_thread, NULL, omap3_hwc_hdmi_thread, hwc_dev))
+    {
+            ALOGE("failed to create uevent listening thread (%d): %m", errno);
+            err = -errno;
+            goto done;
+    }
+
+    if (pthread_create(&hwc_dev->vsync_thread, NULL, vsync_loop, hwc_dev))
+    {
+            ALOGE("failed to create vsync-sysfs listening thread (%d): %m", errno);
+            err = -errno;
+            goto done;
+    }
 
     /* read switch state */
     int sw_fd = open("/sys/class/switch/display_support/state", O_RDONLY);
@@ -1903,8 +1909,10 @@ done:
         pthread_mutex_destroy(&hwc_dev->lock);
         free(hwc_dev->buffers);
         free(hwc_dev);
+#ifndef OMAP3_HWC_BOOTLOADER_DISPLAY_INIT
     } else {
         omap3_hwc_reset_screen(hwc_dev);
+#endif
     }
 
     return err;
